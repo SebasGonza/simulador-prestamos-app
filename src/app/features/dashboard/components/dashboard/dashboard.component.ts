@@ -1,4 +1,4 @@
-import { Component, inject, OnInit } from '@angular/core';
+import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import {
   ReactiveFormsModule,
@@ -16,7 +16,7 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatToolbarModule } from '@angular/material/toolbar';
 import { MatDividerModule } from '@angular/material/divider';
 import { BaseChartDirective } from 'ng2-charts';
-import { ChartConfiguration, ChartData, ChartType } from 'chart.js';
+import { ChartConfiguration, ChartData } from 'chart.js';
 import {
   Firestore,
   collection,
@@ -49,33 +49,27 @@ import {
   styleUrl: './dashboard.component.css',
 })
 export class DashboardComponent implements OnInit {
-  // Datos del usuario logueado
   private currentUser: any = null;
   userName: string = 'Usuario';
   userEmail: string = '';
 
-  // Estadísticas del sistema
   lastRecordDate: any = null;
   totalRecords: number = 0;
 
-  // Formulario del préstamo
   formularioSimulacion: FormGroup;
 
-  // Resultados del cálculo
   pagoMensual: number = 0;
   totalPagar: number = 0;
   totalInteres: number = 0;
   mostrarResultados: boolean = false;
 
-  // --- CONFIGURACIÓN DE GRÁFICAS ---
-
-  // 1. Gráfica Circular (Doughnut) - Distribución Capital vs Interés
+  // Gráfica Circular
   public doughnutChartLabels: string[] = ['Capital', 'Interés'];
   public doughnutChartData: ChartData<'doughnut'> = {
     labels: this.doughnutChartLabels,
     datasets: [
       {
-        data: [75, 25], // Datos de ejemplo
+        data: [0, 0],
         backgroundColor: ['#6366f1', '#ef4444'],
         hoverBackgroundColor: ['#4f46e5', '#dc2626'],
         borderWidth: 0,
@@ -96,20 +90,13 @@ export class DashboardComponent implements OnInit {
     cutout: '70%',
   };
 
-  // 2. Gráfica de Barras - Proyección de Amortización (Ejemplo)
-  public barChartLabels: string[] = [
-    'Mes 1',
-    'Mes 2',
-    'Mes 3',
-    'Mes 4',
-    'Mes 5',
-    'Mes 6',
-  ];
+  // Gráfica de Barras
+  public barChartLabels: string[] = [];
   public barChartData: ChartData<'bar'> = {
-    labels: this.barChartLabels,
+    labels: [],
     datasets: [
       {
-        data: [1000, 850, 700, 550, 400, 250], // Datos de ejemplo
+        data: [],
         label: 'Saldo Pendiente',
         backgroundColor: '#6366f1',
         borderColor: '#6366f1',
@@ -139,14 +126,12 @@ export class DashboardComponent implements OnInit {
     },
   };
 
-  // El constructor nos sirve para inyectar todas las dependencias
   constructor(
     private authService: AuthService,
     private router: Router,
     private fb: FormBuilder,
     private firestore: Firestore,
   ) {
-    // Creamos el formulario reactivo para capturar los datos del usuario
     this.formularioSimulacion = this.fb.group({
       monto: [null, [Validators.required, Validators.min(1)]],
       tasaInteres: [null, [Validators.required, Validators.min(0)]],
@@ -154,36 +139,29 @@ export class DashboardComponent implements OnInit {
     });
   }
 
-  // Al iniciar el componente cargamos los datos del usuario logueado
   ngOnInit(): void {
     this.obtenerDatosUsuario();
   }
 
-  // Obtenemos la información de Firebase Auth
   obtenerDatosUsuario() {
-    this.authService.usuarioActual$.subscribe((user) => {
+    this.authService.usuarioActual$.subscribe((user: any) => {
       if (user) {
         this.currentUser = user;
         this.userName = user.displayName || 'Usuario';
         this.userEmail = user.email || 'Sin correo';
-        // Buscamos las estadísticas solo de este usuario
         this.obtenerEstadisticas(user.uid);
       }
     });
   }
 
-  // Consultamos en Firestore cuántas simulaciones ha hecho el usuario y la última fecha
   private async obtenerEstadisticas(uid: string) {
     try {
-      // Definimos la consulta filtrando por el ID del usuario actual
       const coleccionRef = collection(this.firestore, 'simulaciones');
       const consultaSimple = query(coleccionRef, where('uid', '==', uid));
 
-      // Contamos todos los documentos del usuario
       const snapshotTotal = await getCountFromServer(consultaSimple);
       this.totalRecords = snapshotTotal.data().count;
 
-      // Buscamos solo el último registro para sacar la fecha
       const consultaUltima = query(
         coleccionRef,
         where('uid', '==', uid),
@@ -194,7 +172,6 @@ export class DashboardComponent implements OnInit {
       const snapshotUltima = await getDocs(consultaUltima);
       if (!snapshotUltima.empty) {
         const ultimoDoc = snapshotUltima.docs[0].data();
-        // Convertimos el Timestamp de Firebase a un Date de JS
         this.lastRecordDate = ultimoDoc['createdAt']?.toDate();
       }
     } catch (e) {
@@ -202,35 +179,24 @@ export class DashboardComponent implements OnInit {
     }
   }
 
-  // Esta función se dispara cuando el usuario le da al botón de Calcular
   calcular() {
-    // Si el formulario no es válido, marcamos los errores y no seguimos
     if (this.formularioSimulacion.invalid) {
       this.formularioSimulacion.markAllAsTouched();
       return;
     }
 
-    // Tomamos los valores del formulario para hacer las cuentas
     const { monto, tasaInteres, plazo } = this.formularioSimulacion.value;
 
-    // --- FORMULAS DEL PROFE ---
-    // 1. Calcular el interés según la tasa y los meses
     this.totalInteres = monto * (tasaInteres / 100) * plazo;
-    // 2. Sumamos todo para tener el total final
     this.totalPagar = monto + this.totalInteres;
-    // 3. Dividimos entre los meses para sacar la cuota mensual
     this.pagoMensual = this.totalPagar / plazo;
 
-    // Actualizamos el gráfico circular con los nuevos valores
     this.doughnutChartData.datasets[0].data = [monto, this.totalInteres];
 
-    // Montamos la gráfica de barras para ver el saldo bajando mes a mes
     const etiquetas: string[] = [];
     const saldos: number[] = [];
     for (let i = 1; i <= plazo; i++) {
       const saldoActual = this.totalPagar - this.pagoMensual * i;
-
-      // Controlamos que no se sature la gráfica si son muchos meses
       if (plazo <= 12 || i % Math.ceil(plazo / 12) === 0 || i === plazo) {
         etiquetas.push(`Mes ${i}`);
         saldos.push(Math.max(0, saldoActual));
@@ -248,10 +214,7 @@ export class DashboardComponent implements OnInit {
       ],
     };
 
-    // Guardamos la simulación para que el usuario no la pierda
     this.guardarSimulacion();
-
-    // Activamos la bandera para que se vea el panel de resultados en el HTML
     this.mostrarResultados = true;
   }
 
